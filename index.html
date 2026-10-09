@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Geological Information Systems | MSc in Geology</title>
+<style>
+body{font-family:Arial,sans-serif;margin:20px;max-width:1100px;color:#222}
+h1{font-size:1.4em} .row{display:flex;gap:24px;flex-wrap:wrap}
+table.g{border-collapse:collapse} table.g td,table.g th{border:1px solid #888;width:58px;height:50px;text-align:center;font-size:14px}
+table.g th{background:#eee;width:26px;height:22px;font-weight:normal}
+td.c{cursor:pointer} td.sel{outline:3px solid #d33;outline-offset:-3px} td.up{background:#cfe8ff!important} td.th{box-shadow:inset 0 0 0 3px #1a7}
+input.e{width:48px;text-align:center;border:none;background:transparent;font-size:14px}
+.arrow{font-size:20px;line-height:1} .code{font-size:11px;color:#555}
+button{margin:2px;padding:5px 10px} #detail table{border-collapse:collapse;margin-top:6px}
+#detail td,#detail th{border:1px solid #aaa;padding:3px 8px;font-size:13px;text-align:center}
+.best{background:#ffe9a8} .sink{background:#fbd} .note{font-size:13px;color:#555}
+
+body{font-family:"Segoe UI",Arial,sans-serif;margin:32px auto;padding:0 24px 32px;max-width:1100px;background:#f5f7f8;color:#243743}
+.course-header{position:relative;overflow:hidden;padding:38px 40px;margin-bottom:30px;border-radius:18px;background:linear-gradient(115deg,#102d3c,#185463 72%,#27736f);color:#fff;box-shadow:0 12px 30px rgba(16,45,60,.15)}
+.course-label{position:relative;z-index:1;display:inline-block;padding:7px 12px;border:1px solid rgba(255,255,255,.35);border-radius:6px;color:#d5ece7;font-size:12px;font-weight:600;letter-spacing:1.8px;text-transform:uppercase}
+.course-header h1{position:relative;z-index:1;margin:19px 0 12px;font-size:clamp(28px,4vw,44px);font-weight:650;line-height:1.15;letter-spacing:-1px}
+.course-subtitle{position:relative;z-index:1;margin:0;color:#c8e0e3;font-size:16px}
+.terrain-art{position:absolute;right:-35px;bottom:-25px;width:420px;color:#b6e1cc;opacity:.19;pointer-events:none}
+.calculator-title{font-size:22px;font-weight:600;margin-bottom:12px}
+button{padding:9px 14px;margin:4px 3px 4px 0;border:1px solid #cfdbdf;border-radius:7px;background:#fff;color:#194b59;font:inherit;font-size:13px;cursor:pointer}
+button:hover{background:#e8f1f0;border-color:#8bb6af}
+.row{margin-top:20px}
+.row>div{background:#fff;padding:16px;border:1px solid #dfe7e9;border-radius:12px}
+.row h3{margin:0 0 14px;font-size:16px;color:#194b59}
+table.g td,table.g th{border-color:#c5d3d8}
+table.g th{background:#edf3f4;color:#526972}
+.note{color:#5b707a;line-height:1.65}
+#detail,#thalweg{line-height:1.6;overflow-x:auto}
+</style>
+</head>
+<body>
+<header class="course-header">
+<div class="course-label">MSc in Geology</div>
+<h1>Geological Information Systems</h1>
+<p class="course-subtitle">Terrain analysis · D8 flow routing</p>
+<svg class="terrain-art" viewBox="0 0 440 220" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.3">
+<path d="M10 210 C60 120 90 190 150 100 S240 150 290 70 S360 80 430 10"/><path d="M-10 190 C40 100 90 165 140 80 S230 130 280 50 S350 60 420 -10"/>
+<path d="M30 230 C80 140 110 210 170 120 S260 170 310 90 S380 100 450 30"/><path d="M-30 170 C20 80 70 145 120 60 S210 110 260 30 S330 40 400 -30"/></g></svg>
+</header>
+<h2 class="calculator-title">D8 flow routing: step-by-step calculator</h2>
+<p class="note">Click a cell to see the calculation. Cells are (row, column) from the top-left. Diagonal drops are divided by &radic;2. The grid is fixed at 5 × 5 with 1 m spacing. Contributing area includes the cell itself.</p>
+<div>
+<button onclick="loadExercise('plane')">1 Inclined plane</button>
+<button onclick="loadExercise('pit')">2 Central depression</button>
+<button onclick="loadExercise('valley')">3 Valley</button>
+<button onclick="showMainFlowPath()">Main flow path</button>
+<button onclick="clearSelection()">Clear selection</button>
+</div>
+<div class="row">
+<div><h3>Elevation (m)</h3><div id="elev"></div></div>
+<div><h3>Flow direction (D8 code)</h3><div id="dir"></div></div>
+<div><h3>Flow accumulation</h3><div id="acc"></div></div>
+</div>
+<div id="detail"></div><div id="thalweg"></div>
+<script>
+const GRID_SIZE = 5;
+const TOLERANCE = 1e-12;
+const EXERCISES = {
+  plane: [[10,9,8,7,6],[10,9,8,7,6],[10,9,8,7,6],[10,9,8,7,6],[10,9,8,7,6]],
+  pit: [[12,11,10,11,12],[11,9,8,9,11],[10,8,5,8,10],[11,9,8,9,11],[12,11,10,11,12]],
+  valley: [[14,13,12,13,14],[13,11,10,11,13],[12,10,8,9,10],[13,11,10,7,11],[14,13,12,11,6]]
+};
+// Order matters: the first direction wins ties.
+const DIRECTIONS = [
+  [-1,-1,32,'↖'],[-1,0,64,'↑'],[-1,1,128,'↗'],[0,-1,16,'←'],
+  [0,1,1,'→'],[1,-1,8,'↙'],[1,0,4,'↓'],[1,1,2,'↘']
+];
+let elevations = copyGrid(EXERCISES.valley);
+let selectedCell = null, mainFlowPath = [], flowDirections = [], contributing = [];
+
+function copyGrid(g) { return g.map(r => [...r]); }
+function label(r, c) { return '(' + (r + 1) + ', ' + (c + 1) + ')'; }
+function loadExercise(name) { elevations = copyGrid(EXERCISES[name]); selectedCell = null; mainFlowPath = []; render(); }
+function clearSelection() { selectedCell = null; render(); }
+function selectCell(r, c) { selectedCell = [r, c]; render(); }
+function updateElevation(r, c, v) {
+  const n = Number(v);
+  if (String(v).trim() !== '' && Number.isFinite(n)) { elevations[r][c] = n; mainFlowPath = []; }
+  render();
+}
+
+function getNeighbours(r, c) {
+  const out = [];
+  for (const [dr, dc, code, arrow] of DIRECTIONS) {
+    const nr = r + dr, nc = c + dc;
+    if (nr < 0 || nc < 0 || nr >= GRID_SIZE || nc >= GRID_SIZE) continue;
+    const distance = (dr && dc) ? Math.SQRT2 : 1;
+    const drop = elevations[r][c] - elevations[nr][nc];
+    out.push({ r: nr, c: nc, code, arrow, distance, drop, gradient: drop / distance });
+  }
+  return out;
+}
+
+function calculateFlowDirections() {
+  flowDirections = [];
+  for (let r = 0; r < GRID_SIZE; r++) {
+    flowDirections.push([]);
+    for (let c = 0; c < GRID_SIZE; c++) {
+      let best = null, ties = 0;
+      for (const n of getNeighbours(r, c)) {
+        if (n.gradient <= TOLERANCE) continue;
+        if (!best || n.gradient > best.gradient + TOLERANCE) { best = n; ties = 0; }
+        else if (Math.abs(n.gradient - best.gradient) <= TOLERANCE) ties++;
+      }
+      flowDirections[r].push(best ? Object.assign({}, best, { ties }) : null);
+    }
+  }
+}
+
+function calculateContributing() {
+  const cache = {};
+  function upstream(r, c) {
+    const key = r + ',' + c;
+    if (cache[key]) return cache[key];
+    const cells = new Set([key]);
+    for (const n of getNeighbours(r, c)) {
+      const f = flowDirections[n.r][n.c];
+      if (f && f.r === r && f.c === c) upstream(n.r, n.c).forEach(k => cells.add(k));
+    }
+    cache[key] = cells;
+    return cells;
+  }
+  contributing = [];
+  for (let r = 0; r < GRID_SIZE; r++) {
+    contributing.push([]);
+    for (let c = 0; c < GRID_SIZE; c++) contributing[r].push(upstream(r, c));
+  }
+}
+
+function buildTable(content) {
+  let html = '<table class="g"><tr><th></th>';
+  for (let c = 0; c < GRID_SIZE; c++) html += '<th>' + (c + 1) + '</th>';
+  html += '</tr>';
+  for (let r = 0; r < GRID_SIZE; r++) {
+    html += '<tr><th>' + (r + 1) + '</th>';
+    for (let c = 0; c < GRID_SIZE; c++) {
+      let cls = 'c';
+      if (selectedCell && selectedCell[0] === r && selectedCell[1] === c) cls += ' sel';
+      else if (selectedCell && contributing[selectedCell[0]][selectedCell[1]].has(r + ',' + c)) cls += ' up';
+      if (mainFlowPath.some(p => p[0] === r && p[1] === c)) cls += ' th';
+      html += '<td class="' + cls + '" onclick="selectCell(' + r + ',' + c + ')">' + content(r, c) + '</td>';
+    }
+    html += '</tr>';
+  }
+  return html + '</table>';
+}
+
+function render() {
+  calculateFlowDirections();
+  calculateContributing();
+  document.getElementById('elev').innerHTML = buildTable((r, c) =>
+    '<input class="e" type="number" step="any" value="' + elevations[r][c] +
+    '" onchange="updateElevation(' + r + ',' + c + ',this.value)" onclick="event.stopPropagation()">');
+  document.getElementById('dir').innerHTML = buildTable((r, c) => {
+    const f = flowDirections[r][c];
+    return f ? '<div class="arrow">' + f.arrow + '</div><div class="code">' + f.code + '</div>'
+             : '<div class="code">sink / outlet</div>';
+  });
+  document.getElementById('acc').innerHTML = buildTable((r, c) => contributing[r][c].size);
+  showCellDetails();
+  showPath();
+}
+
+function showCellDetails() {
+  const el = document.getElementById('detail');
+  if (!selectedCell) { el.innerHTML = ''; return; }
+  const [r, c] = selectedCell, f = flowDirections[r][c];
+  let h = '<h3>Cell ' + label(r, c) + ', elevation = ' + elevations[r][c] + ' m</h3>' +
+    '<table><tr><th>Neighbour</th><th>Code</th><th>Elevation (m)</th><th>Drop (m)</th><th>Distance</th><th>Gradient</th></tr>';
+  for (const n of getNeighbours(r, c)) {
+    const chosen = f && n.r === f.r && n.c === f.c;
+    h += '<tr class="' + (chosen ? 'best' : '') + '"><td>' + label(n.r, n.c) + ' ' + n.arrow + '</td><td>' + n.code +
+      '</td><td>' + elevations[n.r][n.c] + '</td><td>' + n.drop.toFixed(2) + '</td><td>' +
+      (n.distance === 1 ? '1' : '√2 ≈ 1.414') + '</td><td>' + n.gradient.toFixed(4) + '</td></tr>';
+  }
+  h += '</table>';
+  if (f) {
+    h += '<p><strong>Flow direction:</strong> ' + f.arrow + ', code ' + f.code + ', towards ' + label(f.r, f.c) +
+      (f.ties ? ' (tie between ' + (f.ties + 1) + ' neighbours; first in table order used)' : '') +
+      '.<br><strong>Slope:</strong> S = Δz / d = ' + f.drop + ' / ' + (f.distance === 1 ? '1' : '√2') + ' = ' +
+      f.gradient.toFixed(4) + ' m/m = ' + (f.gradient * 100).toFixed(2) + ' % = ' +
+      (Math.atan(f.gradient) * 180 / Math.PI).toFixed(2) + '°</p>';
+  } else {
+    h += '<p class="sink"><strong>No lower neighbour inside the grid:</strong> sink, flat terminal cell or possible edge outlet. Depressions are not filled.</p>';
+  }
+  const list = [...contributing[r][c]].map(k => { const [a, b] = k.split(',').map(Number); return label(a, b); });
+  h += '<p><strong>Contributing cells:</strong> ' + list.length + ' (blue in the grids): ' + list.join(', ') + '</p>';
+  el.innerHTML = h;
+}
+
+function showMainFlowPath() {
+  let end = null;
+  for (let r = 0; r < GRID_SIZE; r++) for (let c = 0; c < GRID_SIZE; c++) {
+    if (flowDirections[r][c]) continue;
+    if (!end || contributing[r][c].size > contributing[end[0]][end[1]].size) end = [r, c];
+  }
+  const path = [end];
+  let cur = end;
+  while (true) {
+    let donor = null;
+    for (const n of getNeighbours(cur[0], cur[1])) {
+      const f = flowDirections[n.r][n.c];
+      if (!f || f.r !== cur[0] || f.c !== cur[1]) continue;
+      const size = contributing[n.r][n.c].size;
+      if (!donor || size > donor.size || (size === donor.size && elevations[n.r][n.c] > elevations[donor.r][donor.c]))
+        donor = { r: n.r, c: n.c, size };
+    }
+    if (!donor) break;
+    cur = [donor.r, donor.c];
+    path.push(cur);
+  }
+  mainFlowPath = path.reverse();
+  render();
+}
+
+function showPath() {
+  const el = document.getElementById('thalweg');
+  if (!mainFlowPath.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<h3>Main flow path (green outline): upstream → terminal cell</h3><p>' +
+    mainFlowPath.map(p => label(p[0], p[1]) + ' = ' + elevations[p[0]][p[1]] + ' m').join(' → ') +
+    '</p><p class="note">Traced upstream from the terminal cell with the largest contributing area, choosing the donor with the greatest accumulation at each step.</p>';
+}
+
+render();
+</script>
+</body>
+</html>
